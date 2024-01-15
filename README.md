@@ -51,7 +51,11 @@ xv6中文文档：https://th0ar.gitbooks.io/xv6-chinese/content/index.html
 
 # [xv6手册与代码笔记](https://www.zhihu.com/column/c_1345025252318007298)
 
+原文链接：https://zhuanlan.zhihu.com/p/352432393
 
+原文作者：[Iguodala](https://www.zhihu.com/people/iguodala-62)
+
+这个作者翻译的应该是目前我检索到的最好的了，仅次于直接看MIT课程的课堂翻译；这里copy下来自己留着看
 
 
 
@@ -949,6 +953,547 @@ RISC-V会将代表缺页错误类型的数字存放进scause寄存器中，同�
 事实上，很多操作系统就是这么设计的，在效率上的提升很显著。xv6不这样设计的原因是，内核的代码需要相当小心地编写，否则就会出现一些严重的安全漏洞（例如用户指针使用不当），而且这会使得内核代码会相当复杂，毕竟xv6只是一个简单的教学操作系统。
 
 
+
+
+
+# Chapter 5: Interrupts and Device Drivers
+
+
+
+## **Foreword:**
+
+**设备驱动程序Device driver**是一段驻留在操作系统内的代码，用于管理特定的硬件设备。驱动程序负责设置好这些硬件设备，告诉设备要执行什么动作，处理设备产生的中断，并与正在等待该设备的上层用户进程进行交互等。编写设备驱动程序是一件相当棘手的工作，因为驱动程序和它所管理的设备通常是**并发**执行的，而且编写驱动程序的程序员要对底层硬件设备接口相当熟悉了解，这些资料往往很复杂也很稀少。
+
+如果操作系统需要关注一些硬件设备（例如工作完成情况），我们可以配置该设备，使其能够产生**中断Interrupt**。在前一章节我们介绍过，中断是引起**trap**的其中一种方式。内核的trap handler会注意到有设备发出了中断，接着内核就为该设备调用特定的**中断处理程序Interrupt handler**。在xv6中，所有设备的中断，都首先经过中断处理程序**devintr**（kernel/trap.c），再由devintr跳转到具体设备的中断处理程序（如uartintr、virtio_disk_intr等）。
+
+通常情况下，大多数的设备驱动程序，都可以看成一个分上下部分的结构：顶部**top half**运行在内核空间中，通常由某一个进程的内核线程来运行，而底部**bottom half**则在中断产生时执行，大体上就是Interrupt handler。
+
+当内核希望与设备进行一些交互时，请求read、write等系统调用，驱动程序的top half就会被调用，top  half会根据相应请求，让设备开始执行一些具体的操作（例如从磁盘上读一块）；在相关操作完成后，设备就会产生中断，因此驱动程序的bottom  half开始执行，它会查看设备完成的是什么工作，在适当的时候唤醒等待该工作的进程，同时让设备开始做新的工作。
+
+一个设备驱动程序的top half和bottom half，可以**并发**地运行在不同的CPU上。
+
+## **5.1 Code: Console Input**
+
+**控制台Console**是与用户进行交互的硬件设备，它接受用户的输入（如键盘输入），将其传递给内核和用户程序，进行相应的处理，然后再输出结果给用户（如输出到屏幕上）。
+
+首先，简单地看总体流程：用户将会通过**键盘**键入一连串字符，通过连接到RISC-V上的**UART串行端口**（**UART Serial-port**）传输，**控制台**驱动程序将会顺利地接收这些输入。接着，控制台驱动程序处理其中的一些特殊字符（如BackSpace和Ctrl等），并不断累积这些输入字符，直到达到完整的一行（一般用户键入Enter表示一行的结束）。最后，**用户进程**，例如**shell**，就会使用read从控制台中读取这些一行行的输入，然后由shell来具体处理它们。
+
+QEMU仿真的UART是16550系列的芯片。在真实的计算机上，UART可能还会负责管理经典的RS232串行连接。你的键盘输入实际上就是由QEMU仿真的UART硬件传输到xv6内核的。
+
+内核可以访问经**内存映射**的**UART控制寄存器**。RISC-V硬件将UART设备连接到事先约定好的物理地址上，对这些固定物理地址的读或写指令，相当于直接于硬件设备进行交互，而不是与RAM交互。UART经内存映射到从物理地址0x10000000开始的部分上，它有一小部分控制寄存器，每个1B大小，如下所示（kernel/uart.c）。
+
+```c
+// the UART control registers are memory-mapped
+// at address UART0. this macro returns the
+// address of one of the registers.
+#define Reg(reg) ((volatile unsigned char *)(UART0 + reg))
+
+// the UART control registers.
+// some have different meanings for
+// read vs write.
+// see http://byterunner.com/16550.html
+#define RHR 0                 // receive holding register (for input bytes)
+#define THR 0                 // transmit holding register (for output bytes)
+#define IER 1                 // interrupt enable register
+#define IER_TX_ENABLE (1<<0)
+#define IER_RX_ENABLE (1<<1)
+#define FCR 2                 // FIFO control register
+#define FCR_FIFO_ENABLE (1<<0)
+#define FCR_FIFO_CLEAR (3<<1) // clear the content of the two FIFOs
+#define ISR 2                 // interrupt status register
+#define LCR 3                 // line control register
+#define LCR_EIGHT_BITS (3<<0)
+#define LCR_BAUD_LATCH (1<<7) // special mode to set baud rate
+#define LSR 5                 // line status register
+#define LSR_RX_READY (1<<0)   // input is waiting to be read from RHR
+#define LSR_TX_IDLE (1<<5)    // THR can accept another character to send
+```
+
+我们看几个重要的控制寄存器：在**RHR**中保持着UART接收的输入，等待内核将其内容取走；**THR**保持着内核的输入，等待UART将其发送。对于内核的read或write指令，将访问对应的RHR或THR控制寄存器。**LSR**包含一些位，LSR_RX_READY指示RHR中是否有输入字符，等待内核将其读出；一旦被读出，UART就将其从内部的FIFO缓冲区中移除，直到缓冲区为空时置位LSR_TX_IDLE。以上是UART的接收部分硬件，发送部分硬件很大程度上与其相互独立。如果内核往THR中写入了一个字节，那么UART就发送该字节。
+
+接下来，我们逐步往前溯源，观察控制台输入是如何到达用户进程shell并被处理的。
+
+xv6在main进行了控制台的初始化，调用consoleinit来完成，然后consoleinit又调用**uartinit**初始化UART（kernel/uart.c），如下所示。uartinit主要的工作是写入相关的控制寄存器，配置好传输的波特率，重置FIFO缓冲区，最后开启**接收中断receive interrupt**和**发送完成中断transmit complete interrupt**。之后，每当UART收到一个字节的输入时，就会产生receive interrupt；每当UART完成一个字节的发送时，就会产生transmit complete interrupt。
+
+```c
+void
+uartinit(void)
+{
+  // disable interrupts.
+  WriteReg(IER, 0x00);
+
+  // special mode to set baud rate.
+  WriteReg(LCR, LCR_BAUD_LATCH);
+
+  // LSB for baud rate of 38.4K.
+  WriteReg(0, 0x03);
+
+  // MSB for baud rate of 38.4K.
+  WriteReg(1, 0x00);
+
+  // leave set-baud mode,
+  // and set word length to 8 bits, no parity.
+  WriteReg(LCR, LCR_EIGHT_BITS);
+
+  // reset and enable FIFOs.
+  WriteReg(FCR, FCR_FIFO_ENABLE | FCR_FIFO_CLEAR);
+
+  // enable transmit and receive interrupts.
+  WriteReg(IER, IER_TX_ENABLE | IER_RX_ENABLE);
+
+  initlock(&uart_tx_lock, "uart");
+}
+```
+
+xv6的**shell**可以**主动**地**从控制台读取输入**，shell发出**read**的系统调用请求后，最终将导向到控制台驱动程序的top half，并执行**consoleread**（kernel/console.c）。consoleread主要从缓冲区**cons.buf**中读取**整行的输入**到用户空间中，如果cons.buf中**没有字符可读**，或者读完了缓冲区中的所有字符但**该行仍未结束**，shell自己会**睡眠**，并等待条件满足时才会被唤醒。
+
+```c
+struct {
+  struct spinlock lock;
+  
+  // input
+#define INPUT_BUF 128
+  char buf[INPUT_BUF];
+  uint r;  // Read index
+  uint w;  // Write index
+  uint e;  // Edit index
+} cons;
+
+// user read()s from the console go here.
+// copy (up to) a whole input line to dst.
+// user_dist indicates whether dst is a user
+// or kernel address.
+//
+int
+consoleread(int user_dst, uint64 dst, int n)
+{
+  uint target;
+  int c;
+  char cbuf;
+
+  target = n;
+  acquire(&cons.lock);
+  while(n > 0){
+    // wait until interrupt handler has put some
+    // input into cons.buffer.
+    while(cons.r == cons.w){
+      if(myproc()->killed){
+        release(&cons.lock);
+        return -1;
+      }
+      sleep(&cons.r, &cons.lock);
+    }
+
+    c = cons.buf[cons.r++ % INPUT_BUF];
+
+    if(c == C('D')){  // end-of-file
+      if(n < target){
+        // Save ^D for next time, to make sure
+        // caller gets a 0-byte result.
+        cons.r--;
+      }
+      break;
+    }
+
+    // copy the input byte to the user-space buffer.
+    cbuf = c;
+    if(either_copyout(user_dst, dst, &cbuf, 1) == -1)
+      break;
+
+    dst++;
+    --n;
+
+    if(c == '\n'){
+      // a whole line has arrived, return to
+      // the user-level read().
+      break;
+    }
+  }
+  release(&cons.lock);
+
+  return target - n;
+}
+```
+
+接着我们往前一步，如果有**输入字符到达控制台**，控制台将会产生**中断**，因此跳转到控制台的中断处理程序**consoleintr**，它会将输入字符缓冲到cons.buf中，然后返回。直到**cons.buf里累积了一整行的输入**，consoleintr才会**唤醒**一个用户进程的（比如shell）consoleread，然后consoleread将缓冲在cons.buf中的一整行输入，拷贝到用户空间，然后返回到用户进程。
+
+```c
+// the console input interrupt handler.
+// uartintr() calls this for input character.
+// do erase/kill processing, append to cons.buf,
+// wake up consoleread() if a whole line has arrived.
+//
+void
+consoleintr(int c)
+{
+  acquire(&cons.lock);
+
+  switch(c){
+  case C('P'):  // Print process list.
+    procdump();
+    break;
+  case C('U'):  // Kill line.
+    while(cons.e != cons.w &&
+          cons.buf[(cons.e-1) % INPUT_BUF] != '\n'){
+      cons.e--;
+      consputc(BACKSPACE);
+    }
+    break;
+  case C('H'): // Backspace
+  case '\x7f':
+    if(cons.e != cons.w){
+      cons.e--;
+      consputc(BACKSPACE);
+    }
+    break;
+  default:
+    if(c != 0 && cons.e-cons.r < INPUT_BUF){
+      c = (c == '\r') ? '\n' : c;
+
+      // echo back to the user.
+      consputc(c);
+
+      // store for consumption by consoleread().
+      cons.buf[cons.e++ % INPUT_BUF] = c;
+
+      if(c == '\n' || c == C('D') || cons.e == cons.r+INPUT_BUF){
+        // wake up consoleread() if a whole line (or end-of-file)
+        // has arrived.
+        cons.w = cons.e;
+        wakeup(&cons.r);
+      }
+    }
+    break;
+  }
+  
+  release(&cons.lock);
+}
+```
+
+在consoleintr唤醒一个进程的consoleread时，该进程之前主动地使用consoleread读出一行中的部分输入，现在在被唤醒之后，它能够顺利地读完全部这一行（到**换行符'\n'**或**文件结束符'ctrl+D'**为止）；也可能之前没有进程因调用consoleread而睡眠，则consoleintr不会唤醒任何进程，之后用户进程主动调用consoleread时，同样也能读出一整行的用户输入。
+
+以上是用户进程（例如shell）从控制台读出输入的部分。现在我们往回再倒退一点，用户通过键盘输入一个字符，到控制台接收到这个字符，在这之间我们通过**UART**进行传输。
+
+当用户键下键盘输入一个字符，且UART的RHR接收到时，UART就会向CPU发出**中断**（receive interrupt），在内核中执行trap handler。发现是设备中断后，trap handler会跳转到**devintr**，如下所示。在devintr中，通过检查scause中的值，发现该设备中断来自于外部设备，然后由PLIC（管理着所有的外部设备中断）告诉CPU，是哪个设备产生中断。最后发现是UART之后，devintr就会跳转到uartintr，即UART的中断处理程序，进行相关处理。
+
+```c
+// check if it's an external interrupt or software interrupt,
+// and handle it.
+// returns 2 if timer interrupt,
+// 1 if other device,
+// 0 if not recognized.
+int
+devintr()
+{
+  uint64 scause = r_scause();
+
+  if((scause & 0x8000000000000000L) &&
+     (scause & 0xff) == 9){
+    // this is a supervisor external interrupt, via PLIC.
+
+    // irq indicates which device interrupted.
+    int irq = plic_claim();
+
+    if(irq == UART0_IRQ){
+      uartintr();
+    } else if(irq == VIRTIO0_IRQ){
+      virtio_disk_intr();
+    } else if(irq){
+      printf("unexpected interrupt irq=%d\n", irq);
+    }
+
+    // the PLIC allows each device to raise at most one
+    // interrupt at a time; tell the PLIC the device is
+    // now allowed to interrupt again.
+    if(irq)
+      plic_complete(irq);
+
+    return 1;
+  } else if(scause == 0x8000000000000001L){
+    // software interrupt from a machine-mode timer interrupt,
+    // forwarded by timervec in kernelvec.S.
+
+    if(cpuid() == 0){
+      clockintr();
+    }
+    
+    // acknowledge the software interrupt by clearing
+    // the SSIP bit in sip.
+    w_sip(r_sip() & ~2);
+
+    return 2;
+  } else {
+    return 0;
+  }
+}
+```
+
+**uartintr**（kernel/uart.c）如下所示，它首先尝试从其控制寄存器**RHR**中读出一个字符（我们说过RHR保持着UART接收的输入），如果有，直接将该字符交给控制台驱动程序的bottom  half，即consoleintr来处理该字符（实际上在UART的中断处理程序中，又调用了控制台的中断处理程序，但这不是通过中断实现的，并不是中断嵌套），然后consoleintr做的工作正如前面我们所说明的那样。但如果RHR中没有字符可读，uartintr并不会阻塞地等待那些尚未到达RHR的字符，但也不会因此错过它们，因为之后新的字符被用户键入时，UART还会发出后续中断。
+
+```c
+// handle a uart interrupt, raised because input has
+// arrived, or the uart is ready for more output, or
+// both. called from trap.c.
+void
+uartintr(void)
+{
+  // read and process incoming characters.
+  while(1){
+    int c = uartgetc();
+    if(c == -1)
+      break;
+    consoleintr(c);
+  }
+
+  // send buffered characters.
+  acquire(&uart_tx_lock);
+  uartstart();
+  release(&uart_tx_lock);
+}
+
+
+// read one input character from the UART.
+// return -1 if none is waiting.
+int
+uartgetc(void)
+{
+  if(ReadReg(LSR) & 0x01){
+    // input data is ready.
+    return ReadReg(RHR);
+  } else {
+    return -1;
+  }
+}
+```
+
+处理完RHR中保持的字符后，UART接着调用uartstart，在该函数中，检查UART的缓冲区里是否有需要UART发送的数据，如果有，并且**THR**为空，就将该字符写入到THR中，UART就会发送该字节，在下一小节我们将更仔细地说明发送的部分。
+
+现在，我们总结一下从用户键盘输入，到shell读出输入的整个过程：
+
+> 用户键盘输入一个字符**->**UART在RHR中接收到该字符，发出中断**->**xv6接收到中断，陷入trap**->**trap handler发现是外部设备中断，设备是UART**->**调用uartintr**->**发现RHR中有字符可读，调用consoleintr**->**将输入字符缓冲到cons.buf中，如果读到'\n'或'ctrl+D'，说明用户输入满足一行，就唤醒consoleread**->**读出一整行的用户输入，拷贝到用户空间中
+
+## **5.2 Code: Console Output**
+
+现在我们观察控制台的输出，首先，我们依然简单地看总体流程：用户进程需要产生一些输出到控制台上，以便通过屏幕显示给用户。所以，用户进程，例如shell，通过系统调用**write**，往某个发送缓冲区里写入一些字符；我们通过UART来传输这些字符，所以我们应该往UART的**发送缓冲区**里写入它们，然后用户进程就可以返回；UART会在适当的时候，将一个字符写入**控制寄存器THR**；最后，UART将字符成功地发送到了控制台，控制台呈现输出给用户。
+
+UART的发送缓冲区定义如下，该**发送缓冲区uart_tx_buf**由UART的驱动程序维护。
+
+```c
+// the transmit output buffer.
+struct spinlock uart_tx_lock;
+#define UART_TX_BUF_SIZE 32
+char uart_tx_buf[UART_TX_BUF_SIZE];
+int uart_tx_w; // write next to uart_tx_buf[uart_tx_w++]
+int uart_tx_r; // read next from uart_tx_buf[uar_tx_r++]
+```
+
+用户进程请求的write系统调用，最终将导向到UART驱动程序的top half，并执行**uartputc**（kernel/uart.c），如下所示。对于用户进程来说，只需要通过uartputc**向发送缓冲区中写入一个字符**，并且**调用uartstart**，而uartstart无论如何都会很快就返回，后面我们将看到这点；如果**发送缓冲区已满**，驱动程序的决定是暂时将该进程挂起，让其**睡眠**，什么时候唤醒呢？同样也是在uartstart中，这一点我们很快也将进行补充说明。
+
+```c
+// add a character to the output buffer and tell the
+// UART to start sending if it isn't already.
+// blocks if the output buffer is full.
+// because it may block, it can't be called
+// from interrupts; it's only suitable for use
+// by write().
+void
+uartputc(int c)
+{
+  acquire(&uart_tx_lock);
+
+  if(panicked){
+    for(;;)
+      ;
+  }
+
+  while(1){
+    if(((uart_tx_w + 1) % UART_TX_BUF_SIZE) == uart_tx_r){
+      // buffer is full.
+      // wait for uartstart() to open up space in the buffer.
+      sleep(&uart_tx_r, &uart_tx_lock);
+    } else {
+      uart_tx_buf[uart_tx_w] = c;
+      uart_tx_w = (uart_tx_w + 1) % UART_TX_BUF_SIZE;
+      uartstart();
+      release(&uart_tx_lock);
+      return;
+    }
+  }
+}
+```
+
+现在终于轮到了我们的重点关注目标，**uartstart**。uartstart的主要工作是，尝试发送一个位于发送缓冲区中的字符（按**FIFO**的方式），如果**发送缓冲区为空**，或者控制寄存器**THR还持有着字符**（这代表着对于上一个字符，UART的发送**已经就绪**，只是还没发送出去），那么uartstart将会**直接返回**。如果条件满足可以发送，uartstart就会按FIFO的方式，将缓冲区中的一个字符写入寄存器**THR**中，之后UART就会发送THR中的字符；同时**唤醒**一个可能在睡眠的uartputc进程，表明现在发送缓冲区空出了位置，该进程可以继续往缓冲区中写入字符。
+
+```c
+// if the UART is idle, and a character is waiting
+// in the transmit buffer, send it.
+// caller must hold uart_tx_lock.
+// called from both the top- and bottom-half.
+void
+uartstart()
+{
+  while(1){
+    if(uart_tx_w == uart_tx_r){
+      // transmit buffer is empty.
+      return;
+    }
+    
+    if((ReadReg(LSR) & LSR_TX_IDLE) == 0){
+      // the UART transmit holding register is full,
+      // so we cannot give it another byte.
+      // it will interrupt when it's ready for a new byte.
+      return;
+    }
+    
+    int c = uart_tx_buf[uart_tx_r];
+    uart_tx_r = (uart_tx_r + 1) % UART_TX_BUF_SIZE;
+    
+    // maybe uartputc() is waiting for space in the buffer.
+    wakeup(&uart_tx_r);
+    
+    WriteReg(THR, c);
+  }
+}
+```
+
+还有一个地方也会调用uartstart，就是前面提到的**uartintr**。前面讨论的情况是receive interrupt，这里相关的是transmit complete  interrupt，即每当UART发送完一个字符之后，就产生transmit complete  interrupt。同样地，通过中断引发了trap，内核检查后发现是设备中断，在devintr中发现是UART中断，最后又跳转到了uartintr。如前面所示，uartintr的后半部分会调用uartstart。你可能注意到了这其中的延续性：UART发送完一个字符，引发了中断，因此调用uartstart继续发送新的字符。一般来说，如果一个用户进程写入了多个字符，第一个字符由uartputc调用uartstart发送，剩下则的通过transmit complete interrupt发送。
+
+我们可以看到，无论该字符能不能马上被UART发送出去，uartstart都会**很快就返回**，因此我们可以认为uartstart几乎是**无阻塞**的。再返回到上一层，在uartputc中，我们要么会调用uartstart，要么让当前进程挂起并睡眠，因此uartputc也是很快就返回的。所以，UART暴露给用户程序或内核的uartputc接口是**异步**的，用户进程的write可以使用这种接口，因为用户进程可以很快地返回或被挂起，从而很快地进行后续工作或者让出CPU资源。
+
+uartputc也提供了**同步**，或者说**阻塞**的版本，**uartputc_sync**。该版本的接口，用于满足那些需要**马上响应**的需求，因此CPU就阻塞在某处，直到THR中的字符被发送，然后就把需要发送的新字符写入THR。你也可以看到，该字符不会写入发送缓冲区中。事实上，内核的**printf**就使用这个同步的版本，因为内核打印的消息比较重要，我们希望能尽快地显示给用户。
+
+```c
+// alternate version of uartputc() that doesn't 
+// use interrupts, for use by kernel printf() and
+// to echo characters. it spins waiting for the uart's
+// output register to be empty.
+void
+uartputc_sync(int c)
+{
+  push_off();
+
+  if(panicked){
+    for(;;)
+      ;
+  }
+
+  // wait for Transmit Holding Empty to be set in LSR.
+  while((ReadReg(LSR) & LSR_TX_IDLE) == 0)
+    ;
+  WriteReg(THR, c);
+
+  pop_off();
+}
+```
+
+通过控制台输入和输出的两个案例，我们可以认识到，**设备行为**和**用户进程行为**的**解耦**是一个很好的模式，这种模式可以利用**缓冲**和**中断**两种机制来实现。控制台驱动程序可以处理用户输入，尽管当前没有用户进程想要读取输入，但即使是以后才发生的读取，也能看到这些输入；类似的，用户进程可以简单地写入数据就马上离开，而不需要等待设备驱动程序的处理。这些行为都表现出良好的效率，因为设备和用户进程的解耦允许它们**并发**地执行，这会带来很多好处，尤其是用户进程比设备快得多的时候，这种思想称为I/O并发性（**I/O Concurrency**）。
+
+## **5.3 Concurrency In Drivers**
+
+在consoleread和consoleintr中，我们可能已经注意到，对于驱动程序的某些数据结构，多个进程会**并发地访问**它们，因此我们需要**锁**来保护这些数据结构，并通过acquire来获取锁。
+
+如果不使用锁的话，可能会有以下的并发问题：
+
+- 两个不同CPU上的进程同时调用consoleread。
+- 即使CPU已经在执行consoleread，但硬件要求该CPU响应一个控制台（UART）的中断。
+- 当consoleread执行时，硬件可能会在不同的CPU上响应一个控制台（UART）中断。
+
+在下一章我们将讨论锁，以用于解决这些并发问题。
+
+还有一种需要注意的情况是，一个进程可能正在等待设备工作的完成，但是当该设备的工作完成并产生中断时，正在运行的是另一个进程。因为这种原因，中断处理程序不应该认为当前运行的进程就是它所要交付工作的进程。例如，中断处理程序简单地使用当前进程的页表来调用copyout是不安全的。因此，更好的方式是，中断处理程序只做很小一部分工作，例如将数据拷贝到缓冲区中，然后在top half中，唤醒特定的进程来完成剩下的工作。
+
+## **5.4 Timer Interrupts**
+
+xv6使用了**计时器中断**，维护计时器的运行，并且能因此引入基于时间片的进程切换机制（Round-Robin）。计时器中断产生时，首先在机器模式下产生一个软件中断，提醒内核及时处理计时器到时这一事件；在后续内核进行user trap或kernel  trap的过程中，如果中断开放，就能够注意到这一软件中断，从而执行计时器到时的相应逻辑事件（如调度）。我们在第四章中已经介绍过trap的相关部分，最终将由usertrap或kerneltrap负责响应计时器发出的软件中断，执行yield来完成进程切换。有关进程调度的内容我们将在第七章中说明。
+
+计时器中断来自于硬件的计时器芯片，每个CPU都有一片，xv6负责周期性地对这些计时器芯片重新编程，以重置并开始新一轮计时。
+
+正如在上一章中所提及，需要注意的是，计时器中断在**机器模式**下处理，而不是监管者模式。在RISC-V的机器模式下执行，页表将被禁用，而且有专门的一套寄存器（机器模式下的寄存器以m开头命名，监管者模式下的以s开头，监管者模式下的寄存器前面已经介绍了很多）。因此，xv6内核是不能运行在机器模式下的，所以xv6对待计时器中断的方式，和用户空间下的trap，内核空间下的trap不同。
+
+早在xv6的启动阶段，还是机器模式下时，就进行了计时器的初始化（kernel/start.c），如下所示。主要的工作有，对CLINT（core-local  interruptor）进行编程，使其在一定时延后产生中断；然后设置一个类似trapframe的容器scratch，用于在机器模式下保存寄存器和CLINT的地址；最后，设置mtvec，使得机器模式的trap跳转到timervec，并且开放计时器中断。
+
+```c
+// set up to receive timer interrupts in machine mode,
+// which arrive at timervec in kernelvec.S,
+// which turns them into software interrupts for
+// devintr() in trap.c.
+void
+timerinit()
+{
+  // each CPU has a separate source of timer interrupts.
+  int id = r_mhartid();
+
+  // ask the CLINT for a timer interrupt.
+  int interval = 1000000; // cycles; about 1/10th second in qemu.
+  *(uint64*)CLINT_MTIMECMP(id) = *(uint64*)CLINT_MTIME + interval;
+
+  // prepare information in scratch[] for timervec.
+  // scratch[0..3] : space for timervec to save registers.
+  // scratch[4] : address of CLINT MTIMECMP register.
+  // scratch[5] : desired interval (in cycles) between timer interrupts.
+  uint64 *scratch = &mscratch0[32 * id];
+  scratch[4] = CLINT_MTIMECMP(id);
+  scratch[5] = interval;
+  w_mscratch((uint64)scratch);
+
+  // set the machine-mode trap handler.
+  w_mtvec((uint64)timervec);
+
+  // enable machine-mode interrupts.
+  w_mstatus(r_mstatus() | MSTATUS_MIE);
+
+  // enable machine-mode timer interrupts.
+  w_mie(r_mie() | MIE_MTIE);
+}
+```
+
+计时器中断可以在任何时刻发生，不管是在执行用户或内核代码。即使内核正在**临界区**中执行，也**不应该关闭计时器中断**。计时器的中断处理程序应该在一个，不会干扰被中断的内核代码的地方运行，因此计时器中断处理要从机器模式下开始。计时器到时，xv6会陷入机器模式，陷入我们预先在寄存器mtvec中设置好的中断向量timervec中，timervec主要重置计时器，并且发出**软中断software interrupt**，然后立刻返回。通过发出软中断，CPU将处理计时器中断的任务交付给了内核，现在内核可以按照与普通中断相同的trap机制来处理该中断，显然内核也可以屏蔽该软件中断（例如当执行类似acquire的原子操作时，要关闭中断）。处理该软件中断的流程在devintr中。
+
+机器模式下的计时器中断vector，我们在上一章中介绍过，就是**timervec**。它保存一些在xv6启动阶段就设置好的机器模式相关寄存器到scratch中，设置CLINT以便产生下一次计时器中断，并让CPU发出软件中断，恢复寄存器，然后返回。在计时器中断处理程序中没有C代码。
+
+```c
+timervec:
+        # start.c has set up the memory that mscratch points to:
+        # scratch[0,8,16] : register save area.
+        # scratch[32] : address of CLINT's MTIMECMP register.
+        # scratch[40] : desired interval between interrupts.
+        
+        csrrw a0, mscratch, a0
+        sd a1, 0(a0)
+        sd a2, 8(a0)
+        sd a3, 16(a0)
+
+        # schedule the next timer interrupt
+        # by adding interval to mtimecmp.
+        ld a1, 32(a0) # CLINT_MTIMECMP(hart)
+        ld a2, 40(a0) # interval
+        ld a3, 0(a1)
+        add a3, a3, a2
+        sd a3, 0(a1)
+
+        # raise a supervisor software interrupt.
+	li a1, 2
+        csrw sip, a1
+
+        ld a3, 16(a0)
+        ld a2, 8(a0)
+        ld a1, 0(a0)
+        csrrw a0, mscratch, a0
+
+        mret
+```
+
+## **5.5 Real World**
+
+xv6的设备中断和计时器中断，可以发生在内核空间或用户空间下。即使是在内核空间下，计时器中断也会造成线程的切换（通过yield）。这种公平地时分利用CPU的方式非常有效，特别是内核线程有时会耗费大量的时间，却没有返回到用户空间下，这会降低用户的体验。这种方便的进程/线程切换机制，却给xv6的代码带来了很大的复杂性，因为线程现在要被挂起，然后又可能在一个不同的CPU上被唤醒。如果我们设计，设备中断和计时器中断只能在用户空间下产生，那么我们的内核代码将简单得多。
+
+使一台计算机支持所有的设备是一件很庞大的工作，因为设备类型很多，设备的特性也很多，设备和设备驱动程序之间的协议比较复杂，而且关于以上这些信息也只有较少的文档记载。事实上，现在的操作系统中的设备驱动程序代码量，要远大于内核的代码量。
+
+UART驱动程序每次从控制寄存器RHR中读出一个字节大小的字符，这种模式称为编程I/O（**Programmed I/O**），因为我们通过软件来驱动数据传输。编程I/O的方式比较简单，但是很难用于高速率传输的场合。一种更为人熟知的方式是直接存储器访问**DMA**（**Direct Memory Access**），DMA硬件会直接从RAM中读出数据，或将数据直接写入RAM中。现代磁盘和网络设备基本都使用DMA，因为它们对传输速率的要求比较高。DMA中的驱动程序，会在RAM中准备好相应的数据后，通过写入控制寄存器来通知相应设备处理这些数据。
+
+设备在无法预知的时间点完成工作，并不时地让CPU的注意到它，我们使用了中断这种机制。但中断有较高的CPU开销，因此高速设备如网络、磁盘控制器等要设法减少中断的次数。一种方式是，对于一大串的输入输出请求，我们执行一次中断；另一种方式是，禁用中断，而让设备驱动程序**周期性**地检查设备工作是否完成，这种技术称为**轮询Polling**。如果设备的工作很快，轮询是高效的，但如果设备经常处于闲置状态，轮询又会浪费CPU资源。一些驱动程序采用中断和轮询相交替的方式，取决于当前设备的工作负载。
+
+UART驱动程序将数据先拷贝到内核的缓冲区中，再拷贝到用户空间下。如果数据传输速率低，这么做是可以的，但是两次的复制显然不太高效。因此，一些操作系统可以直接在用户缓冲区和设备之间拷贝数据，这通常结合DMA来实现。
 
 
 
