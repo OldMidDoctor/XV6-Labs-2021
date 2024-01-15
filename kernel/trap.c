@@ -77,25 +77,8 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2){
-    // printf("timer say hi\n");
-    p->ticks++;
-    if (p->ticks == p->interval && p->interval > 0 && p->re_entrant == 0){
-      p->re_entrant = 1;
-      p->pre_trapframe->ra = p->trapframe->ra;
-      p->pre_trapframe->sp = p->trapframe->sp;
-      p->pre_trapframe->s0 = p->trapframe->s0;
-      p->pre_trapframe->epc = p->trapframe->epc;
-      p->pre_trapframe->a0 = p->trapframe->a0;
-      p->pre_trapframe->a1 = p->trapframe->a1;
-      p->pre_trapframe->a5 = p->trapframe->a5;
-      p->pre_trapframe->s1 = p->trapframe->s1;
-      p->trapframe->epc = p->alarm_hander;
-    }
-    else{
-      yield();
-    }
-  }
+  if(which_dev == 2)
+    yield();
 
   usertrapret();
 }
