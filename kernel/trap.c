@@ -80,7 +80,7 @@ usertrap(void)
   if(which_dev == 2){
     // printf("timer say hi\n");
     p->ticks++;
-    if (p->ticks == p->interval && p->interval > 0 && p->alarm_hander > 0){
+    if (p->ticks == p->interval && p->interval > 0){
       p->pre_trapframe->ra = p->trapframe->ra;
       p->pre_trapframe->sp = p->trapframe->sp;
       p->pre_trapframe->s0 = p->trapframe->a0;
