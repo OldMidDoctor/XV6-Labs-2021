@@ -74,6 +74,30 @@ sys_sleep(void)
 }
 
 uint64
+sys_sigalarm(void)
+{
+  int period;
+  // uint ticks0;
+  uint64 f_addr;
+  if(argint(0, &period) < 0)
+    return -1;
+  if(argaddr(1, &f_addr) < 0)
+    return -1;
+  printf("sigalarm say hi %d %p\n", period, f_addr);
+  myproc()->interval = period;
+  myproc()->alarm_hander = f_addr;
+  myproc()->ticks = 0;
+  return 0;
+}
+
+uint64
+sys_sigreturn(void)
+{
+  
+  return 0;
+}
+
+uint64
 sys_kill(void)
 {
   int pid;
