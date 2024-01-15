@@ -151,6 +151,7 @@ found:
   p->ticks = 0;
   p->alarm_hander = 0;
   p->interval = 0;
+  p->re_entrant = 0;
 
   return p;
 }

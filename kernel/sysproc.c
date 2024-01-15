@@ -95,6 +95,7 @@ sys_sigreturn(void)
 {
   struct proc *p = myproc();
   p->ticks = 0;
+  p->re_entrant = 0;
   p->trapframe->ra = p->pre_trapframe->ra;
   p->trapframe->sp = p->pre_trapframe->sp;
   p->trapframe->s0 = p->pre_trapframe->s0;
