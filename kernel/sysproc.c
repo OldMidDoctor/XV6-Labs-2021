@@ -103,7 +103,7 @@ sys_sigreturn(void)
   p->trapframe->a5 = p->pre_trapframe->a5;
   p->trapframe->s1 = p->pre_trapframe->s1;
   p->trapframe->epc = p->pre_trapframe->epc;
-  return 0;
+  return p->pre_trapframe->a0;
 }
 
 uint64
