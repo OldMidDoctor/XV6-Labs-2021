@@ -83,7 +83,7 @@ sys_sigalarm(void)
     return -1;
   if(argaddr(1, &f_addr) < 0)
     return -1;
-  printf("sigalarm say hi %d %p\n", period, f_addr);
+  // printf("sigalarm say hi %d %p\n", period, f_addr);
   myproc()->interval = period;
   myproc()->alarm_hander = f_addr;
   myproc()->ticks = 0;

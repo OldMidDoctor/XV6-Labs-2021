@@ -78,7 +78,7 @@ usertrap(void)
 
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2){
-    printf("timer say hi\n");
+    // printf("timer say hi\n");
     p->ticks++;
     if (p->ticks == p->interval && p->interval > 0 && p->alarm_hander > 0){
       p->pre_trapframe->ra = p->trapframe->ra;
