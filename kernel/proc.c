@@ -141,6 +141,10 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  p->ticks = 0;
+  p->alarm_hander = 0;
+  p->interval = 0;
+
   return p;
 }
 
