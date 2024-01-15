@@ -83,7 +83,7 @@ usertrap(void)
     if (p->ticks == p->interval && p->interval > 0){
       p->pre_trapframe->ra = p->trapframe->ra;
       p->pre_trapframe->sp = p->trapframe->sp;
-      p->pre_trapframe->s0 = p->trapframe->a0;
+      p->pre_trapframe->s0 = p->trapframe->s0;
       p->pre_trapframe->epc = p->trapframe->epc;
       p->pre_trapframe->a0 = p->trapframe->a0;
       p->pre_trapframe->a1 = p->trapframe->a1;
