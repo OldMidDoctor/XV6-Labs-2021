@@ -93,7 +93,16 @@ sys_sigalarm(void)
 uint64
 sys_sigreturn(void)
 {
-  
+  struct proc *p = myproc();
+  p->ticks = 0;
+  p->trapframe->ra = p->pre_trapframe->ra;
+  p->trapframe->sp = p->pre_trapframe->sp;
+  p->trapframe->s0 = p->pre_trapframe->s0;
+  p->trapframe->a0 = p->pre_trapframe->a0;
+  p->trapframe->a1 = p->pre_trapframe->a1;
+  p->trapframe->a5 = p->pre_trapframe->a5;
+  p->trapframe->s1 = p->pre_trapframe->s1;
+  p->trapframe->epc = p->pre_trapframe->epc;
   return 0;
 }
 
