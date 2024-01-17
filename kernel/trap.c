@@ -50,7 +50,7 @@ allocpa2cowva(pagetable_t pagetable, uint64 va){
   }
   memmove(mem, (char *)pa, PGSIZE);
   uint flags = (PTE_FLAGS(*pte)  | PTE_W) & ~PTE_COW;
-  if (mappages(pagetable, va, PGSIZE, mem, flags) != 0) {
+  if (mappages(pagetable, va, PGSIZE, (uint64)mem, flags) != 0) {
     kfree((void*)mem);
     return 0;
   }
