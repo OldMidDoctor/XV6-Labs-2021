@@ -32,6 +32,8 @@ trapinithart(void)
 // discrimate it is a COW mapping
 int
 iscowmapping(pagetable_t pagetable, uint64 va){
+  if (va >= MAXVA)
+    return -1;
   pte_t *pte;
   if((pte = walk(pagetable, va, 0)) == 0)
     return -1;
@@ -42,6 +44,8 @@ iscowmapping(pagetable_t pagetable, uint64 va){
 // allocate a physical memory to this COW mapping
 void*
 allocpa2cowva(pagetable_t pagetable, uint64 va){
+  if (va >= MAXVA)
+    return 0;
   if(va % PGSIZE != 0)
     return 0;
   pte_t *pte;
@@ -113,7 +117,7 @@ usertrap(void)
   } 
   else if (r_scause() == 13 || r_scause() == 15){
     uint64 va = r_stval();
-    if (va >= p->sz || va <= PGROUNDDOWN(p->trapframe->sp)
+    if (va >= p->sz
        || iscowmapping(p->pagetable, va) != 0
        || allocpa2cowva(p->pagetable, PGROUNDDOWN(va)) == 0){
       p->killed = 1;
