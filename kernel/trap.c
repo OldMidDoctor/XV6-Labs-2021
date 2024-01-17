@@ -35,6 +35,8 @@ iscowmapping(pagetable_t pagetable, uint64 va){
   pte_t *pte;
   if((pte = walk(pagetable, va, 0)) == 0)
     return -1;
+  if((*pte & PTE_V) == 0)
+    return -1;
   return (*pte & PTE_COW) ? 0 : -1;
 }
 // allocate a physical memory to this COW mapping
