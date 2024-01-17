@@ -29,6 +29,34 @@ trapinithart(void)
   w_stvec((uint64)kernelvec);
 }
 
+// discrimate it is a COW mapping
+int
+iscowmapping(pagetable_t pagetable, uint64 va){
+  pte_t *pte;
+  if((pte = walk(pagetable, va, 0)) == 0)
+    return 0;
+  return (*pte & PTE_COW) ? 1 : 0;
+}
+// allocate a physical memory to this COW mapping
+int
+allocpa2cowva(pagetable_t pagetable, uint64 va){
+  pte_t *pte;
+  char *mem;
+  uint64 pa;
+  pte = walk(pagetable, va, 0);
+  pa = PTE2PA(*pte);
+  if((mem = kalloc()) == 0){
+    return 0;
+  }
+  memmove(mem, (char *)pa, PGSIZE);
+  uint flags = (PTE_FLAGS(*pte)  | PTE_W) & ~PTE_COW;
+  if (mappages(pagetable, va, PGSIZE, mem, flags) != 0) {
+    kfree((void*)mem);
+    return 0;
+  }
+  return mem;
+}
+
 //
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
@@ -65,9 +93,19 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if((which_dev = devintr()) != 0){
+  } 
+  else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } 
+  else if (r_scause() == 13 || r_scause() == 15){
+    uint64 va = r_stval();
+    if (va >= p->sz || va <= PGROUNDDOWN(p->trapframe->sp)
+       || iscowmapping(p->pagetable, va)
+       || allocpa2cowva(p->pagetable, va)){
+      p->killed = 1;
+    }
+  }
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
