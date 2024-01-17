@@ -38,7 +38,7 @@ iscowmapping(pagetable_t pagetable, uint64 va){
   return (*pte & PTE_COW) ? 1 : 0;
 }
 // allocate a physical memory to this COW mapping
-int
+void*
 allocpa2cowva(pagetable_t pagetable, uint64 va){
   pte_t *pte;
   char *mem;
