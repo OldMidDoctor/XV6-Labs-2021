@@ -42,6 +42,8 @@ iscowmapping(pagetable_t pagetable, uint64 va){
 // allocate a physical memory to this COW mapping
 void*
 allocpa2cowva(pagetable_t pagetable, uint64 va){
+  if(va % PGSIZE != 0)
+    return 0;
   pte_t *pte;
   char *mem;
   uint64 pa;
@@ -113,7 +115,7 @@ usertrap(void)
     uint64 va = r_stval();
     if (va >= p->sz || va <= PGROUNDDOWN(p->trapframe->sp)
        || iscowmapping(p->pagetable, va) != 0
-       || allocpa2cowva(p->pagetable, va) == 0){
+       || allocpa2cowva(p->pagetable, PGROUNDDOWN(va)) == 0){
       p->killed = 1;
     }
   }
