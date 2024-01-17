@@ -45,16 +45,24 @@ allocpa2cowva(pagetable_t pagetable, uint64 va){
   uint64 pa;
   pte = walk(pagetable, va, 0);
   pa = PTE2PA(*pte);
-  if((mem = kalloc()) == 0){
-    return 0;
+  if (refpacount((void *)pa) == 1){
+    *pte |= PTE_W;
+    *pte &= ~PTE_COW;
+    return (void*)pa;
   }
-  memmove(mem, (char *)pa, PGSIZE);
-  uint flags = (PTE_FLAGS(*pte)  | PTE_W) & ~PTE_COW;
-  if (mappages(pagetable, va, PGSIZE, (uint64)mem, flags) != 0) {
-    kfree((void*)mem);
-    return 0;
+  else{
+    if((mem = kalloc()) == 0){
+      return 0;
+    }
+    memmove(mem, (char *)pa, PGSIZE);
+    uint flags = (PTE_FLAGS(*pte)  | PTE_W) & ~PTE_COW;
+    if (mappages(pagetable, va, PGSIZE, (uint64)mem, flags) != 0) {
+      kfree((void*)mem);
+      return 0;
+    }
+    kfree((char*)PGROUNDDOWN(pa));  
+    return mem;
   }
-  return mem;
 }
 
 //
