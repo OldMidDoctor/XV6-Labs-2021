@@ -147,6 +147,8 @@ void            trapinit(void);
 void            trapinithart(void);
 extern struct spinlock tickslock;
 void            usertrapret(void);
+int             iscowmapping(pagetable_t, uint64);
+void*           allocpa2cowva(pagetable_t, uint64);
 
 // uart.c
 void            uartinit(void);
