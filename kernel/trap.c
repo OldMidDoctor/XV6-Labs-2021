@@ -55,9 +55,11 @@ allocpa2cowva(pagetable_t pagetable, uint64 va){
       return 0;
     }
     memmove(mem, (char *)pa, PGSIZE);
+    *pte &= ~PTE_V;
     uint flags = (PTE_FLAGS(*pte)  | PTE_W) & ~PTE_COW;
     if (mappages(pagetable, va, PGSIZE, (uint64)mem, flags) != 0) {
       kfree((void*)mem);
+      *pte |= PTE_V;
       return 0;
     }
     kfree((char*)PGROUNDDOWN(pa));  
