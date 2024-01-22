@@ -82,7 +82,7 @@ thread_schedule(void)
      * Invoke thread_switch to switch from t to next_thread:
      * thread_switch(??, ??);
      */
-    thread_switch(&t->thread_context, &current_thread->thread_context);
+    thread_switch((uint64)&t->thread_context, (uint64)&current_thread->thread_context);
   } else
     next_thread = 0;
 }
