@@ -59,6 +59,25 @@ printptr(uint64 x)
     consputc(digits[x >> (sizeof(uint64) * 8 - 4)]);
 }
 
+void
+info(char *fmt, ...){
+  if (myproc()->pid % 2 == 0){
+    printf("\x1b[93m"); // blue
+  }
+  else{
+    printf("\x1b[96m"); //green
+  }
+  printf(fmt);
+  printf("\n\x1b[0m"); //end
+}
+
+void
+scheduler_info(char *fmt, ...){
+  printf("\x1b[91m");
+  printf(fmt);
+  printf("\n\x1b[0m");
+}
+
 // Print to the console. only understands %d, %x, %p, %s.
 void
 printf(char *fmt, ...)
