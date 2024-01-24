@@ -97,7 +97,7 @@ kalloc(void)
     struct run *nextr;
     for (int i = 1; i < NCPU; i++){
       nextid = (i + currentid) % NCPU;
-      acquire(&kmems[nextid].lock, "kmem");
+      acquire(&kmems[nextid].lock);
       nextr = kmems[nextid].freelist;
       if (nextr){
         kmems[nextid].freelist = nextr->next;
