@@ -21,7 +21,9 @@ main(int argc, char *argv[])
   test2();
   exit(0);
 }
-
+/*检索和解析通过statistics()函数获得的系统统计信息。
+具体来说，它在缓冲区buf中搜索等号'='字符，然后尝试从找到的等号的下一个位置解析出一个整数值。
+这个整数值表示的是系统统计数据中某项特定信息的值。*/
 int ntas(int print)
 {
   int n;
@@ -37,6 +39,10 @@ int ntas(int print)
   return n;
 }
 
+/*创建了两个子进程，每一个子进程尝试执行N次内存分配和回收。
+每次分配的内存大小为4096字节。在所有子进程结束后，
+检查内存管理的统计数据是否与预期的增加的次数匹配。
+如果统计的数据符合预期，它将打印“test1 OK”，否则，它将打印“test1 FAIL”*/
 void test1(void)
 {
   void *a, *a1;
@@ -96,6 +102,9 @@ countfree()
   return n;
 }
 
+/*确定计算机是否可以分配所有可用的物理内存，
+并确保在连续分配和释放内存后，已经释放的内存数量保持不变。
+如果测试通过，则打印 "test2 OK"，否则打印"test2 FAIL"*/
 void test2() {
   int free0 = countfree();
   int free1;
