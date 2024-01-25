@@ -24,8 +24,10 @@
 #include "buf.h"
 
 struct {
-  struct spinlock lock;
-  struct buf buf[NBUF];
+  struct spinlock lock;  // Buffer Cache自己有一把自旋锁，而每个缓存块也有一把睡眠锁
+                         // Buffer Cache的自旋锁保护哪些块已经被缓存的信息
+                         // 而每个缓存块的睡眠锁保护对该块内容的读与写
+  struct buf buf[NBUF];  // NBUF = MAXOPBLOCKS * 3 = 30
 
   // Linked list of all buffers, through prev/next.
   // Sorted by how recently the buffer was used.
@@ -33,6 +35,7 @@ struct {
   struct buf head;
 } bcache;
 
+// 首先获取bcache.lock，然后将NBUF个槽位连接成一个链表。初始化之后，所有对于Buffer Cache的访问将通过bcache.head，而不是通过静态数组bcache.buf
 void
 binit(void)
 {
