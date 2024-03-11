@@ -74,40 +74,6 @@ sys_sleep(void)
 }
 
 uint64
-sys_sigalarm(void)
-{
-  int period;
-  // uint ticks0;
-  uint64 f_addr;
-  if(argint(0, &period) < 0)
-    return -1;
-  if(argaddr(1, &f_addr) < 0)
-    return -1;
-  // printf("sigalarm say hi %d %p\n", period, f_addr);
-  myproc()->interval = period;
-  myproc()->alarm_hander = f_addr;
-  myproc()->ticks = 0;
-  return 0;
-}
-
-uint64
-sys_sigreturn(void)
-{
-  struct proc *p = myproc();
-  p->ticks = 0;
-  p->re_entrant = 0;
-  p->trapframe->ra = p->pre_trapframe->ra;
-  p->trapframe->sp = p->pre_trapframe->sp;
-  p->trapframe->s0 = p->pre_trapframe->s0;
-  p->trapframe->a0 = p->pre_trapframe->a0;
-  p->trapframe->a1 = p->pre_trapframe->a1;
-  p->trapframe->a5 = p->pre_trapframe->a5;
-  p->trapframe->s1 = p->pre_trapframe->s1;
-  p->trapframe->epc = p->pre_trapframe->epc;
-  return p->pre_trapframe->a0;
-}
-
-uint64
 sys_kill(void)
 {
   int pid;

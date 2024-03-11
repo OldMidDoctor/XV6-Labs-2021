@@ -44,7 +44,12 @@ OBJS_KCSAN += \
 	$K/kcsan.o
 endif
 
-ifeq ($(LAB),$(filter $(LAB), lock))
+ifeq ($(LAB),pgtbl)
+OBJS += \
+	$K/vmcopyin.o
+endif
+
+ifeq ($(LAB),$(filter $(LAB), pgtbl lock))
 OBJS += \
 	$K/stats.o\
 	$K/sprintf.o
@@ -85,11 +90,7 @@ AS = $(TOOLPREFIX)gas
 LD = $(TOOLPREFIX)ld
 OBJCOPY = $(TOOLPREFIX)objcopy
 OBJDUMP = $(TOOLPREFIX)objdump
-# -fno-pic不使用PIC（位置无关代码），-static将依赖的动态库编译为静态，
-# -fno-builtin不使用C语言自身的内建函数，因为是要写一个完整的操作系统，防止重名，
-# -fno-strict-aliasing编译器规则优化，使一些规则（-O1，-O2，-O3）可以混淆使用。
-# -Wall显示警告 -MD编译并保存代码依赖性 -ggdb产生GDB所需的调试信息 -m32生成32位汇编代码（默认64）-Werror遇到警告也停止编译
-# -fno-omit-frame-pointer保留函数调用产生的frame pointer，方便调试时的回溯
+
 CFLAGS = -Wall -Werror -O -fno-omit-frame-pointer -ggdb
 
 ifdef LAB
@@ -145,7 +146,7 @@ tags: $(OBJS) _init
 
 ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o
 
-ifeq ($(LAB),$(filter $(LAB), lock))
+ifeq ($(LAB),$(filter $(LAB), pgtbl lock))
 ULIB += $U/statistics.o
 endif
 
@@ -192,12 +193,11 @@ UPROGS=\
 	$U/_grind\
 	$U/_wc\
 	$U/_zombie\
-	$U/_alarmtest\
 
 
 
 
-ifeq ($(LAB),$(filter $(LAB), lock))
+ifeq ($(LAB),$(filter $(LAB), pgtbl lock))
 UPROGS += \
 	$U/_stats
 endif
@@ -234,11 +234,6 @@ ph: notxv6/ph.c
 
 barrier: notxv6/barrier.c
 	gcc -o barrier -g -O2 $(XCFLAGS) notxv6/barrier.c -pthread
-endif
-
-ifeq ($(LAB),pgtbl)
-UPROGS += \
-	$U/_pgtbltest
 endif
 
 ifeq ($(LAB),lock)
