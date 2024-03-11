@@ -85,7 +85,11 @@ AS = $(TOOLPREFIX)gas
 LD = $(TOOLPREFIX)ld
 OBJCOPY = $(TOOLPREFIX)objcopy
 OBJDUMP = $(TOOLPREFIX)objdump
-
+# -fno-pic不使用PIC（位置无关代码），-static将依赖的动态库编译为静态，
+# -fno-builtin不使用C语言自身的内建函数，因为是要写一个完整的操作系统，防止重名，
+# -fno-strict-aliasing编译器规则优化，使一些规则（-O1，-O2，-O3）可以混淆使用。
+# -Wall显示警告 -MD编译并保存代码依赖性 -ggdb产生GDB所需的调试信息 -m32生成32位汇编代码（默认64）-Werror遇到警告也停止编译
+# -fno-omit-frame-pointer保留函数调用产生的frame pointer，方便调试时的回溯
 CFLAGS = -Wall -Werror -O -fno-omit-frame-pointer -ggdb
 
 ifdef LAB
