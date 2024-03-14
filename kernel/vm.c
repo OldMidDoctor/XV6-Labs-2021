@@ -281,6 +281,32 @@ freewalk(pagetable_t pagetable)
   kfree((void*)pagetable);
 }
 
+// print that pagetable
+void
+vmprintwalk(pagetable_t pagetable, int level){
+  for (int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if(pte & PTE_V){
+      uint64 child = PTE2PA(pte);
+      switch(level){
+        case 2: printf(" ..%d: pte %p pa %p\n", i, pte, child);break;
+        case 1: printf(" .. ..%d: pte %p pa %p\n", i, pte, child);break;
+        case 0: printf(" .. .. ..%d: pte %p pa %p\n", i, pte, child);break;
+        default: break;
+      }
+      if ((pte & (PTE_R|PTE_W|PTE_X)) == 0){
+        // this PTE points to a lower-level page table.
+        vmprintwalk((pagetable_t) child, level - 1); 
+      }
+    } 
+  }
+}
+void
+vmprint(pagetable_t pagetable ){
+  printf("page table %p\n", pagetable);
+  vmprintwalk(pagetable, 2);
+}
+
 // Free user memory pages,
 // then free page-table pages.
 void
