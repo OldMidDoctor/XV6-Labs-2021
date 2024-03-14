@@ -1,0 +1,12 @@
+# Which registers contain arguments to functions? For example, which register holds 13 in main's call to printf? 
+a2
+# Where is the call to function f in the assembly code for main? Where is the call to g? (Hint: the compiler may inline functions.) 
+在该函数中我们并没有调用f、g这两个函数，因为这两个被编译器优化为了内联函数，在编译期就计算得出了值
+# At what address is the function printf located? 
+1536+0x30 = 0x630
+# What value is in the register ra just after the jalr to printf in main? 
+0x38
+# Run the following code. What is the output?
+HE110 World
+# In the following code, what is going to be printed after 'y='? (note: the answer is not a specific value.) Why does this happen? 
+x=3 y=1

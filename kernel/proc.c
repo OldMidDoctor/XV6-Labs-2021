@@ -179,6 +179,9 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->ticks = 0;
+  p->alarm_hander = 0;
+  p->interval = 0;
 }
 
 // Create a user page table for a given process,

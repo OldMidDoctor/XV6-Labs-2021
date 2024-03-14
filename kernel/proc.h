@@ -111,4 +111,8 @@ struct proc {
   uint64 alarm_hander;         // process's alarm handler
   struct trapframe *pre_trapframe; // save and restore registers
   int re_entrant;        // Prevent re-entrant calls to the handler
+
+  int interval;                // the alarm period set
+  int ticks;                   // how many ticks have passed since the last call (or are left until the next call) 
+  uint64 alarm_hander;         // process's alarm handler
 };
