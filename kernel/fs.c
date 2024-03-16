@@ -239,6 +239,7 @@ iupdate(struct inode *ip)
 // Find the inode with number inum on device dev
 // and return the in-memory copy. Does not lock
 // the inode and does not read it from disk.
+//iget不给相应的inode上锁的原因是，避免在路径名查找当前路径时发生死锁
 static struct inode*
 iget(uint dev, uint inum)
 {
@@ -649,6 +650,9 @@ dirlink(struct inode *dp, char *name, uint inum)
 //   skipelem("a", name) = "", setting name = "a"
 //   skipelem("", name) = skipelem("////", name) = 0
 //
+// skipelem将下个path element拷贝到name中，返回跟在下个path element的后续路径
+// 如果skipelem返回'\0'，表示提取出的path element已经是最后一个
+// 如果path是'\0'，那么skipelem返回0
 static char*
 skipelem(char *path, char *name)
 {
@@ -682,34 +686,53 @@ static struct inode*
 namex(char *path, int nameiparent, char *name)
 {
   struct inode *ip, *next;
-
+  // 决定从哪里开始找，如果有'/'就从根目录开始，否则从当前目录开始
   if(*path == '/')
     ip = iget(ROOTDEV, ROOTINO);
   else
     ip = idup(myproc()->cwd);
 
   while((path = skipelem(path, name)) != 0){
+    // skipelem将下个path element拷贝到name中，返回跟在下个path element的后续路径
+    // 如果*path=='\0'就表示提取出的path element已经是最后一个
+    // 例: 最开始path = '/a/b'，b可以是文件也可以是目录，当前目录ip为根目录'/'
+    // 1、path = /b,name = a,next = name = a,ip = next = a
+    // 2、path = "\0",name = b,(如果是nameiparent就在这一步停止并返回ip = a,name = b),
+    // next = name = b,ip = next = b
+    // 3、path = 0,name = b,ip = b,namei在跳出循环后返回ip = b
     ilock(ip);
+    // 检查当前结点ip是否为目录类型
     if(ip->type != T_DIR){
       iunlockput(ip);
       return 0;
     }
+    // path='\0'表示name已经是最后一个元素
     if(nameiparent && *path == '\0'){
       // Stop one level early.
       iunlock(ip);
+      // 调用者为nameiparent，当前ip就是最后一个元素的父目录
+      // 最后一个元素的名称在skipelem中已被复制到name
       return ip;
     }
+    // 在当前目录结点ip下，找name，也就是找下一个path element，iget增加ref计数，因此不必担心其他线程的删除操作
     if((next = dirlookup(ip, name, 0)) == 0){
+      // 在当前目录结点下找不到
       iunlockput(ip);
       return 0;
     }
+    // 释放ip，为下一次循环做准备
+    // 当查找'.'时，next和ip相同，若在释放ip的锁之前给next上锁就会发生死锁
+    // 因此namex在下一个循环中获取next的锁之前，在这里要先释放ip的锁，从而避免死锁
     iunlockput(ip);
     ip = next;
   }
   if(nameiparent){
+    // 正常情况下nameiparent应该在主循环中就返回
+    // 如果运行到了这里，说明nameiparent失败，因此namex返回0
     iput(ip);
     return 0;
   }
+  // When the loop runs out of path elements, it returns
   return ip;
 }
 

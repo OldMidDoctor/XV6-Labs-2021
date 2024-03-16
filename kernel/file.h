@@ -22,8 +22,8 @@ struct inode {
   int valid;          // inode has been read from disk?
 
   short type;         // copy of disk inode
-  short major;
-  short minor;
+  short major;        // 主要设备号
+  short minor;        // 次要设备号
   short nlink;
   uint size;
   uint addrs[NDIRECT+1];
