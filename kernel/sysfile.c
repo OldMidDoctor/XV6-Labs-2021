@@ -484,3 +484,84 @@ sys_pipe(void)
   }
   return 0;
 }
+
+//sysfile.c
+ //...
+ //char* mmap( char* addr, int length, int prot, int flags,int fd, int off);
+uint64 sys_mmap(void)
+{
+  // to gain the arguments , file and proc
+  uint64 addr;
+  int len , prot , flags , fd , off;
+  if( argaddr( 0 , &addr ) < 0 || argint( 1 , &len ) < 0 || argint( 2 , &prot ) < 0 || argint( 3 , &flags ) < 0 || argint( 4 , &fd ) < 0 || argint( 5 , &off ) < 0 )
+    return -1;
+  struct proc *p = myproc();
+  struct file *f = p->ofile[fd];
+  
+  // to ensure the prot
+  if( ( flags == MAP_SHARED && f->writable == 0 && (prot&PROT_WRITE)) )
+    return -1;
+
+  // to find a empty vma and init it
+  int idx;
+  for( idx = 0 ; idx < VMA_MAX ; idx++ )
+    if( p->vma[idx].valid == 0 )
+      break;
+
+  if( idx == VMA_MAX )
+    panic("no empty vma field");
+  
+  struct VMA* vp = &p->vma[idx];
+  vp->valid = 1;
+  vp->len = len;
+  vp->flags = flags;
+  vp->off = off;
+  vp->prot = prot;
+  vp->f = f;
+  filedup( f );  //increase the ref of the file
+
+  vp->addr = (p->maxaddr-=len);  // asign a useable virtual address to the vma field , and maintain the maxaddr
+  return vp->addr;
+}
+
+
+//sysfile.c
+//...
+//int munmap( char* addr , int len );
+uint64 sys_munmap(void)
+{
+  // to gain the arguments and proc
+  uint64 addr;
+  int len;
+  if( argaddr( 0 , &addr ) < 0 || argint( 1 , &len ) < 0 )
+    return -1;
+  struct proc* p = myproc();
+
+  //to find the target vma
+  struct VMA* vp = 0;
+  for( int i=0 ; i<VMA_MAX ; i++ )
+    if( p->vma[i].addr <= addr && addr < p->vma[i].addr + p->vma[i].len && p->vma[i].valid == 1 )
+    {
+      vp = &p->vma[i];
+      break;
+    }
+  if( vp == 0 )
+    panic("munmap no such vma");  
+
+  // if the page has been mapped 
+  if( walkaddr( p->pagetable , addr ) != 0)
+  {
+    //write back if necessary 
+    if( vp->flags == MAP_SHARED )
+      filewriteoff( vp->f , addr , len , addr-vp->addr ); // this function is new
+    uvmunmap( p->pagetable , addr , len/PGSIZE , 1 );   //unmap
+    return 0;
+  }
+  // maintain the ref of file and the valid of the vma
+  if( 0 == (vp->mapcnt -= len) )
+  {
+    fileclose( vp->f );
+    vp->valid = 0;
+  }
+  return 0;
+}

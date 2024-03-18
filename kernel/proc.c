@@ -141,6 +141,14 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  //to init the vma field
+   for( int i=0 ; i<VMA_MAX ; i++ )
+   {
+     p->vma[i].valid = 0;
+     p->vma[i].mapcnt = 0;
+   }
+   p->maxaddr = MAXVA - 2*PGSIZE;
+
   return p;
 }
 
@@ -315,6 +323,13 @@ fork(void)
   np->state = RUNNABLE;
   release(&np->lock);
 
+  np->maxaddr = p->maxaddr;
+  for( int i=0 ; i<VMA_MAX ; i++ )
+    if( p->vma[i].valid ){
+      filedup( p->vma[i].f );
+      memmove( &np->vma[i] , &p->vma[i] , sizeof( struct VMA ));
+    }
+
   return pid;
 }
 
@@ -340,6 +355,25 @@ void
 exit(int status)
 {
   struct proc *p = myproc();
+
+  for( int i=0 ; i<VMA_MAX ; i++ )
+   {
+     if( p->vma[i].valid == 1 )
+     {
+       struct VMA* vp = &p->vma[i];
+       for( uint64 addr = vp->addr ; addr < vp->addr + vp->len ; addr += PGSIZE )
+       {
+         if( walkaddr( p->pagetable , addr ) != 0 )
+         {
+           if( vp->flags == MAP_SHARED )
+             filewriteoff( vp->f , addr , PGSIZE , addr-vp->addr );
+           uvmunmap( p->pagetable , addr , 1 , 1 );
+         }
+       }
+       fileclose( p->vma[i].f );
+       p->vma[i].valid = 0;
+     }
+   }
 
   if(p == initproc)
     panic("init exiting");

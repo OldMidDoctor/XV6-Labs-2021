@@ -17,6 +17,17 @@ struct context {
   uint64 s10;
   uint64 s11;
 };
+#define VMA_MAX 16
+ struct VMA{
+   int valid;        //有效位，当值为 0 时表示无效，即为 empty element
+   uint64 addr;      //记录起始地址
+   int len;          //长度
+   int prot;         //权限（read/write）
+   int flags;        //区域类型（shared/private）
+   int off;          //偏移量
+   struct file* f;   //映射的文件
+   uint64 mapcnt;    //（延迟申请）已经映射的页数量
+ };
 
 // Per-CPU state.
 struct cpu {
@@ -103,6 +114,8 @@ struct proc {
   struct trapframe *trapframe; // data page for trampoline.S
   struct context context;      // swtch() here to run process
   struct file *ofile[NOFILE];  // Open files
+  struct VMA vma[VMA_MAX];     // virtual memory address field arr
+  uint64 maxaddr;       //当前可用的最大的虚拟地址  从上往下
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
 };
